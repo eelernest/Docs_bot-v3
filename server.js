@@ -2,9 +2,9 @@ import express from 'express';
 import { OpenAI } from 'openai';
 import dotenv from 'dotenv';
 import cors from 'cors';
-import session from 'express-session'; // Para gestionar sesiones
-import path from 'path'; // Para manejar rutas de archivos estáticos
-import { fileURLToPath } from 'url'; // Necesario para emular __dirname
+import session from 'express-session';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
 dotenv.config();
 
@@ -14,30 +14,30 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Habilitar CORS
 app.use(cors());
 app.use(express.json());
 
-// Configurar las sesiones
+// Configuración de la sesión
 app.use(session({
   secret: process.env.SESSION_SECRET,
   resave: false,
-  saveUninitialized: true,
-  cookie: { secure: process.env.NODE_ENV === 'production' } // Configurar secure: true si es HTTPS
+  saveUninitialized: true, // Cambia a 'true' para forzar la creación de una sesión
+  cookie: { secure: false } // Asegúrate de que esté en 'false' para entorno local sin HTTPS
 }));
 
-// Inicia el cliente OpenAI
+
 const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY, // Open AI API_key
+  apiKey: process.env.OPENAI_API_KEY,
 });
 
-// Crea un nuevo thread de OpenAI
+// Función para crear un nuevo thread
 async function createNewThread() {
   const newThread = await openai.beta.threads.create();
+  console.log(`Thread creado: ${newThread.id}`);
   return newThread.id;
 }
 
-// Agrega un mensaje a un thread
+// Función para agregar mensaje a un thread existente
 async function addMessage(threadId, message) {
   const messageResponse = await openai.beta.threads.messages.create(threadId, {
     role: "user",
@@ -46,9 +46,9 @@ async function addMessage(threadId, message) {
   return messageResponse;
 }
 
-// Obtiene los mensajes de un thread
+// Función para obtener el último mensaje en el thread
 async function getMessages(asistente, thread) {
-  console.log("thinking...");
+  console.log("Obteniendo respuesta de OpenAI...");
   const run = await openai.beta.threads.runs.create(thread, {
     assistant_id: asistente
   });
@@ -57,7 +57,7 @@ async function getMessages(asistente, thread) {
     if (runInfo.status === "completed") {
       break;
     }
-    console.log("waiting 1 sec...");
+    console.log("Esperando 1 segundo...");
     await new Promise(resolve => setTimeout(resolve, 1000));
   }
   const messages = await openai.beta.threads.messages.list(thread);
@@ -65,27 +65,25 @@ async function getMessages(asistente, thread) {
   return messageContent;
 }
 
-// Ruta para hacer la consulta a OpenAI
+// Ruta para hacer consultas a OpenAI
 app.post("/ask", async (req, res) => {
   const { question, textContent } = req.body;
-  const asistente = process.env.ASSISTANT_ID; // ASSISTANT_ID
-  
-  // Si el usuario no tiene un thread en la sesión, creamos uno nuevo
+  const asistente = process.env.ASSISTANT_ID;
+
+  console.log(`threadId actual en sesión: ${req.session.threadId}`);
+
+  // Crea un nuevo thread solo si no existe uno en la sesión
   if (!req.session.threadId) {
     req.session.threadId = await createNewThread();
-    console.log(`Nuevo thread creado: ${req.session.threadId}`);
+    console.log(`Nuevo thread asignado a la sesión: ${req.session.threadId}`);
   }
-  
+
   const thread = req.session.threadId;
   const mensaje = `${textContent}\n\nPregunta: ${question}`;
 
   try {
-    // Agregar el mensaje al hilo
     await addMessage(thread, mensaje);
-    
-    // Obtener la respuesta de OpenAI
     const ultimoMensaje = await getMessages(asistente, thread);
-
     res.json({ answer: ultimoMensaje.trim() });
   } catch (error) {
     console.error('Error al consultar OpenAI:', error);
@@ -93,15 +91,12 @@ app.post("/ask", async (req, res) => {
   }
 });
 
-// Sirve los archivos estáticos "public"
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Ruta para servir el frontend
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Inicia el servidor
 app.listen(PORT, () => {
   console.log(`Servidor corriendo en http://localhost:${PORT}`);
 });
